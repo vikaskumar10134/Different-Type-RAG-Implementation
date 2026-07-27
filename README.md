@@ -1,36 +1,40 @@
 # Self-RAG using LangGraph + NVIDIA AI + FAISS
 
-A complete implementation of **Self-RAG (Self Reflective Retrieval Augmented Generation)** using:
+A Self-Reflective Retrieval-Augmented Generation (Self-RAG) implementation built with **LangGraph**, **LangChain**, **NVIDIA LLM**, **NVIDIA Embeddings**, and **FAISS**.
 
-- LangGraph
-- LangChain
-- NVIDIA LLM
-- NVIDIA Embeddings
-- FAISS Vector Database
-- Structured Output (Pydantic)
+The workflow intelligently decides whether retrieval is necessary, verifies retrieved documents, validates generated answers, and automatically retries with an improved retrieval query when needed.
 
 ---
 
-# What is Self-RAG?
+# Features
 
-Unlike traditional RAG, Self-RAG continuously evaluates its own answers.
-
-Instead of simply retrieving documents and generating an answer, it asks itself:
-
-- Do I even need retrieval?
-- Are the retrieved documents relevant?
-- Is my answer actually supported by those documents?
-- Is my answer useful?
-- If not...
-    - Rewrite the query
-    - Retrieve again
-    - Generate again
-
-This feedback loop greatly improves answer quality.
+* Intelligent retrieval decision
+* FAISS vector database
+* NVIDIA Embeddings
+* Document relevance filtering
+* Context-only answer generation
+* Answer grounding verification
+* Query rewriting
+* Automatic retry mechanism
+* LangGraph workflow
 
 ---
 
-# Overall Workflow
+# Tech Stack
+
+| Component         | Library                        |
+| ----------------- | ------------------------------ |
+| LLM               | NVIDIA Chat                    |
+| Workflow          | LangGraph                      |
+| Embeddings        | NVIDIA Embeddings              |
+| Vector Store      | FAISS                          |
+| PDF Loader        | PyPDFLoader                    |
+| Chunking          | RecursiveCharacterTextSplitter |
+| Structured Output | Pydantic                       |
+
+---
+
+# Workflow Overview
 
 ```mermaid
 flowchart TD
@@ -39,20 +43,21 @@ A[User Question]
 
 A --> B{Need Retrieval?}
 
-B -- No --> C[Generate Direct Answer]
-C --> Z[END]
+B -->|No| C[Generate Direct Answer]
 
-B -- Yes --> D[Retrieve Documents]
+B -->|Yes| D[Retrieve Documents]
+
+C --> Z[END]
 
 D --> E[Check Document Relevance]
 
-E -->|Relevant Docs| F[Generate From Context]
+E -->|Relevant| F[Generate From Context]
 
-E -->|No Relevant Docs| Y[No Answer]
+E -->|No Relevant Documents| Y[No Answer Found]
 
 F --> G[Verify Answer Support]
 
-G -->|Fully Supported| H[Useful?]
+G -->|Supported| H[Check Answer Usefulness]
 
 G -->|Not Supported| I[Revise Answer]
 
@@ -69,740 +74,409 @@ Y --> Z
 
 ---
 
-# Project Pipeline
+# Step 1 - Document Preprocessing
 
-The system consists of **11 nodes**.
+Before answering any question, the documents are prepared for semantic search.
 
+## Pipeline
+
+```text
+PDF Files
+     │
+     ▼
+Load Documents
+     │
+     ▼
+Split into Chunks
+     │
+     ▼
+Generate Embeddings
+     │
+     ▼
+Store in FAISS
+     │
+     ▼
+Retriever
 ```
-Question
-    │
-    ▼
-Decide Retrieval
-    │
-    ├──────────────► Direct Generation
-    │
-    ▼
-Retrieve
-    │
-    ▼
-Check Relevance
-    │
-    ▼
-Generate From Context
-    │
-    ▼
-Support Verification
-    │
-    ▼
-Useful Check
-    │
-    ▼
-Rewrite Query
-```
-
----
-
-# Step 1 : Document Preprocessing
-
-## Purpose
-
-Prepare documents for semantic search.
 
 ### Process
 
-```
-PDF Files
-      │
-      ▼
-Load PDFs
-      │
-      ▼
-Split into Chunks
-      │
-      ▼
-Generate Embeddings
-      │
-      ▼
-Store inside FAISS
-      │
-      ▼
-Retriever
-```
-
-### Code Flow
-
-```
-PDF
- ↓
-PyPDFLoader
-
- ↓
-RecursiveCharacterTextSplitter
-
- ↓
-NVIDIA Embedding
-
- ↓
-FAISS
-
- ↓
-Retriever
-```
+1. Load multiple PDF documents.
+2. Split documents into small overlapping chunks.
+3. Generate embeddings for every chunk.
+4. Store embeddings inside FAISS.
+5. Create a retriever using MMR search.
 
 ---
 
-# Step 2 : Decide Whether Retrieval is Needed
+# Step 2 - Decide Whether Retrieval is Needed
 
-Node:
-
-```
-decide_retrieval()
-```
-
-Instead of always searching documents, the LLM first decides whether retrieval is necessary.
+Instead of always searching the vector database, the model first decides whether retrieval is required.
 
 Examples
 
-Question:
-
-```
-What is Python?
-```
-
-No retrieval required.
-
-Question:
-
-```
-What is my company's leave policy?
-```
-
-Retrieval required.
-
-Decision Output
-
-```
-{
-    "should_retrieve": true
-}
-```
+| Question                            | Retrieval |
+| ----------------------------------- | --------- |
+| What is Python?                     | ❌ No      |
+| What is our company's leave policy? | ✅ Yes     |
 
 ---
-
-Diagram
 
 ```mermaid
 flowchart LR
 
-Question --> Decision
+Q[Question]
 
-Decision -->|True| Retrieve
+Q --> D{Need Retrieval?}
 
-Decision -->|False| DirectGeneration
+D -->|Yes| R[Retrieve]
+
+D -->|No| G[Generate Direct Answer]
 ```
 
 ---
 
-# Step 3 : Direct Generation
+# Step 3 - Direct Generation
 
-If retrieval is not required:
+If retrieval is unnecessary, the LLM answers using its general knowledge.
 
-```
+```text
 Question
-
-↓
-
+    │
+    ▼
 LLM
-
-↓
-
+    │
+    ▼
 Answer
 ```
 
-No document search occurs.
-
 ---
 
-# Step 4 : Retrieve Documents
+# Step 4 - Retrieve Documents
 
-Node
+The retriever searches the FAISS vector database.
 
-```
-retrieve()
-```
-
-Uses
-
-- FAISS
-- NVIDIA Embeddings
-- MMR Search
-
-Process
-
-```
+```text
 Question
-
-↓
-
+     │
+     ▼
 Retriever
-
-↓
-
-Top 3 Documents
+     │
+     ▼
+Top 3 Similar Documents
 ```
 
 ---
 
-# Step 5 : Relevance Checking
+# Step 5 - Document Relevance Check
 
-Not every retrieved document is useful.
+Each retrieved document is checked independently.
 
-Each document is evaluated individually.
-
-```
-Question
-
-+
-
-Document
-
-↓
-
-LLM
-
-↓
-
-Relevant ?
-
-```
-
-Example
-
-Question
-
-```
-Leave Policy
-```
-
-Document
-
-```
-Company Leave Policy
-```
-
-Relevant
-
-Question
-
-```
-Leave Policy
-```
-
-Document
-
-```
-Company Financial Report
-```
-
-Not Relevant
-
----
-
-Diagram
+Only relevant documents continue to the next stage.
 
 ```mermaid
 flowchart TD
 
-Retriever
+R[Retrieved Documents]
 
--->
+R --> D1[Document 1]
 
-Doc1
+R --> D2[Document 2]
 
--->
+R --> D3[Document 3]
 
-Relevant
+D1 --> K1[Relevant]
 
-Retriever
+D2 --> K2[Not Relevant]
 
--->
-
-Doc2
-
--->
-
-Not Relevant
-
-Retriever
-
--->
-
-Doc3
-
--->
-
-Relevant
+D3 --> K3[Relevant]
 ```
 
-Only relevant documents continue.
+After filtering:
+
+```text
+Relevant Documents
+        │
+        ▼
+Merged Context
+```
 
 ---
 
-# Step 6 : Generate Answer From Context
+# Step 6 - Generate Answer From Context
 
-Context is created by concatenating every relevant document.
+The filtered documents are combined into one context.
 
-```
-Relevant Doc 1
-
-+
-
-Relevant Doc 2
-
-+
-
-Relevant Doc 3
-
-↓
-
-Large Context
-
-↓
-
-LLM
-
-↓
-
-Answer
-```
-
-The model is explicitly instructed:
-
-- Use ONLY provided context
-- Never use outside knowledge
-
----
-
-# Step 7 : Support Verification (Self Reflection)
-
-This is the most important part.
-
-Node
-
-```
-is_sup()
-```
-
-The model asks itself
-
-```
-Is my answer actually supported by the context?
-```
-
-Output
-
-```
-Fully Supported
-
-Partially Supported
-
-No Support
-```
-
-Diagram
-
-```mermaid
-flowchart TD
-
-Generated Answer
-
-+
-
+```text
+Relevant Documents
+        │
+        ▼
 Context
-
-↓
-
-Support Checker
-
-↓
-
-Fully Supported
-
-Partially Supported
-
-No Support
-```
-
----
-
-# Step 8 : Revise Answer
-
-If answer isn't supported
-
-```
+        │
+        ▼
+LLM
+        │
+        ▼
 Answer
-
-↓
-
-Revision Prompt
-
-↓
-
-Quote Only
-
-↓
-
-Support Check Again
 ```
 
-This loop continues until
+The prompt instructs the model to:
 
-- Fully supported
-
-or
-
-- Maximum retries reached
+* Use only the provided context
+* Never use outside knowledge
+* Return "No relevant document found" if context is insufficient
 
 ---
 
-Diagram
+# Step 7 - Verify Answer Support
+
+The generated answer is compared against the retrieved context.
+
+Possible outputs:
+
+* Fully Supported
+* Partially Supported
+* No Support
 
 ```mermaid
 flowchart LR
 
-Answer --> Revise
+A[Generated Answer]
 
-Revise --> Verify
+C[Retrieved Context]
 
-Verify --> Revise
+A --> V[Support Verification]
+
+C --> V
+
+V --> F[Fully Supported]
+
+V --> P[Partially Supported]
+
+V --> N[No Support]
 ```
 
 ---
 
-# Step 9 : Useful Check
+# Step 8 - Revise Unsupported Answers
 
-Even if an answer is correct...
+If the answer is not sufficiently supported, it is regenerated.
 
-It may still not answer the user's question.
+```mermaid
+flowchart LR
+
+A[Answer]
+
+A --> R[Revise]
+
+R --> V[Verify Again]
+
+V -->|Still Unsupported| R
+
+V -->|Supported| U[Continue]
+```
+
+This loop continues until:
+
+* Answer is supported
+* Maximum retry count is reached
+
+---
+
+# Step 9 - Check Answer Usefulness
+
+A grounded answer is not always useful.
 
 Example
 
 Question
 
-```
-What is refund policy?
-```
+> What is the refund policy?
 
-Answer
+Poor Answer
 
-```
-Our company values customers...
-```
+> Our company values customers.
 
-Supported?
-
-Yes.
-
-Useful?
-
-No.
-
-The model therefore performs another evaluation.
-
-Output
-
-```
-Useful
-
-or
-
-Not Useful
-```
-
----
-
-Diagram
+Although it may be true, it does not answer the question.
 
 ```mermaid
 flowchart TD
 
-Answer
+A[Generated Answer]
 
-↓
+A --> U{Useful?}
 
-Useful?
+U -->|Yes| E[END]
 
-↓
-
-Yes -------> END
-
-No
-
-↓
-
-Rewrite Query
+U -->|No| Q[Rewrite Query]
 ```
 
 ---
 
-# Step 10 : Rewrite Query
+# Step 10 - Rewrite Query
 
-When the answer isn't useful, the original question is rewritten into a better retrieval query.
+If the answer is not useful, the original question is rewritten into a better retrieval query.
 
 Example
 
 Original
 
-```
+```text
 Can I get my money back?
 ```
 
 Rewritten
 
-```
-Refund policy cancellation refund timeline
+```text
+refund policy cancellation refund timeline
 ```
 
-The improved query retrieves better documents.
+The improved query is sent back to the retriever.
+
+```mermaid
+flowchart LR
+
+Q[Original Question]
+
+Q --> W[Rewrite Query]
+
+W --> R[Retrieve Again]
+```
 
 ---
 
-Diagram
+# Complete LangGraph Pipeline
 
 ```mermaid
 flowchart TD
 
+Start([START])
+
+Start --> Decide[Decide Retrieval]
+
+Decide -->|No| Direct[Generate Direct]
+
+Direct --> End([END])
+
+Decide -->|Yes| Retrieve[Retrieve Documents]
+
+Retrieve --> Relevant[Check Relevance]
+
+Relevant -->|Relevant| Generate[Generate From Context]
+
+Relevant -->|No Relevant Docs| NoAnswer[No Answer]
+
+Generate --> Verify[Verify Support]
+
+Verify -->|Supported| Useful[Check Usefulness]
+
+Verify -->|Not Supported| Revise[Revise Answer]
+
+Revise --> Verify
+
+Useful -->|Useful| End
+
+Useful -->|Not Useful| Rewrite[Rewrite Query]
+
+Rewrite --> Retrieve
+
+NoAnswer --> End
+```
+
+---
+
+# Retry Strategy
+
+## Answer Revision Loop
+
+```text
+Generate Answer
+      │
+      ▼
+Verify Support
+      │
+      ▼
+Revise Answer
+      │
+      └───────────────► Verify Again
+```
+
+---
+
+## Query Rewrite Loop
+
+```text
 Question
-
-↓
-
-Rewrite Query
-
-↓
-
-Retrieve Again
-
-↓
-
-Generate Again
-```
-
----
-
-# Complete LangGraph
-
-```mermaid
-flowchart TD
-
-START
-
--->
-
-DecideRetrieval
-
-DecideRetrieval
-
---No-->
-
-GenerateDirect
-
-GenerateDirect
-
--->
-
-END
-
-DecideRetrieval
-
---Yes-->
-
+    │
+    ▼
 Retrieve
-
-Retrieve
-
--->
-
-RelevantCheck
-
-RelevantCheck
-
---No Docs-->
-
-NoAnswer
-
-RelevantCheck
-
---Relevant-->
-
-GenerateContext
-
-GenerateContext
-
--->
-
-SupportCheck
-
-SupportCheck
-
---Supported-->
-
-UsefulCheck
-
-SupportCheck
-
---Not Supported-->
-
-Revise
-
-Revise
-
--->
-
-SupportCheck
-
-UsefulCheck
-
---Useful-->
-
-END
-
-UsefulCheck
-
---Not Useful-->
-
-RewriteQuery
-
-RewriteQuery
-
--->
-
-Retrieve
-
-NoAnswer
-
--->
-
-END
-```
-
----
-
-# Retry Mechanism
-
-Two retry loops exist.
-
-## Loop 1
-
-Support Verification
-
-```
+    │
+    ▼
 Generate
-
-↓
-
-Verify
-
-↓
-
-Revise
-
-↓
-
-Verify
-
-↓
-
-Revise
-```
-
-Stops after
-
-```
-MAX_RETRIES
-```
-
----
-
-## Loop 2
-
-Query Improvement
-
-```
-Question
-
-↓
-
-Retrieve
-
-↓
-
-Generate
-
-↓
-
+    │
+    ▼
 Useful?
-
-↓
-
-Rewrite
-
-↓
-
-Retrieve Again
-```
-
-Stops after
-
-```
-MAXIMUM_TRIES
+    │
+    ▼
+Rewrite Query
+    │
+    └────────────► Retrieve Again
 ```
 
 ---
 
-# Technologies Used
+# Project Structure
 
-| Component | Library |
-|------------|----------|
-| Workflow | LangGraph |
-| LLM | NVIDIA Chat |
-| Embedding | NVIDIA Embedding |
-| Vector Store | FAISS |
-| Structured Output | Pydantic |
-| Prompting | LangChain |
-| Loader | PyPDFLoader |
+```text
+Self_RAG_Module.py
+
+│
+├── Document Preprocessing
+├── State Definition
+├── Retrieval Decision
+├── Direct Generation
+├── Retrieve Documents
+├── Relevance Checking
+├── Context Generation
+├── Support Verification
+├── Answer Revision
+├── Useful Check
+├── Query Rewriting
+└── LangGraph Workflow
+```
 
 ---
 
-# Advantages of Self-RAG
+# Advantages
 
-- Retrieves documents only when needed.
-- Filters irrelevant documents.
-- Prevents hallucinations.
-- Verifies factual grounding.
-- Improves retrieval through query rewriting.
-- Produces more reliable answers than standard RAG.
-- Modular LangGraph workflow with clear decision points.
+* Reduces unnecessary retrieval
+* Improves retrieval quality
+* Filters irrelevant documents
+* Minimizes hallucinations
+* Verifies answer grounding
+* Automatically retries when answers are poor
+* Modular LangGraph architecture
 
 ---
 
 # Future Improvements
 
-- Hybrid Search (BM25 + Dense Retrieval)
-- Cross-Encoder Re-ranking
-- Multi-Query Retrieval
-- Context Compression
-- Citation Generation
-- Streaming Responses
-- Human-in-the-Loop Review
-- Memory Integration
-- Agentic Tool Calling
-- Adaptive Retrieval Strategies
+* Hybrid Search (BM25 + Dense Retrieval)
+* Cross Encoder Re-ranking
+* Parent Document Retriever
+* Multi Query Retrieval
+* Context Compression
+* Streaming Responses
+* Human-in-the-Loop
+* Memory Integration
+* Citation Generation
+* Web Search Fallback
 
 ---
 
-# Workflow Summary
+# Overall Lifecycle
 
-```
+```text
 User Question
       │
       ▼
@@ -814,16 +488,16 @@ Need Retrieval?
 Direct   Retrieve
            │
            ▼
-     Relevance Check
+Relevance Check
            │
            ▼
- Generate from Context
+Generate Answer
            │
            ▼
- Verify Support
+Support Verification
            │
            ▼
- Useful Check
+Useful Check
            │
       ┌────┴────┐
       │         │
@@ -831,31 +505,9 @@ Direct   Retrieve
      END   Rewrite Query
                 │
                 ▼
-            Retrieve Again
+           Retrieve Again
 ```
 
 ---
 
-# Self-RAG Lifecycle
-
-```
-Question
-   ↓
-Need Retrieval
-   ↓
-Retrieve
-   ↓
-Filter Documents
-   ↓
-Generate
-   ↓
-Verify
-   ↓
-Useful?
-   ↓
-Rewrite
-   ↓
-Retrieve Again
-   ↓
-END
-```
+**This implementation demonstrates a complete Self-RAG pipeline where the system not only retrieves and generates answers, but also evaluates its own outputs, revises unsupported responses, and improves retrieval through query rewriting for higher reliability.**
